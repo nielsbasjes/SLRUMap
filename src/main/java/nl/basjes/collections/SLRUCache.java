@@ -3,6 +3,7 @@ package nl.basjes.collections;
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -24,8 +25,8 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
     // The maximum number of entries in the LRU
     private final int capacity;
 
-    /** Hash based lookup for fast retrieval */
-    private HashEntry<K, V>[] hashLookup;
+    /** Hash based lookup for fast and unsynchronized retrieval */
+    private Map<K, HashEntry<K, V>>[] hashLookup;
 
     private int hashIndex(Object key) {
         if (key == null) {
@@ -38,10 +39,7 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
         return Math.abs(hashCode) % hashLookup.length;
     }
 
-    /** List of all elements.
-     * The entry in the hashLookup is the first element in
-     * the chain of all elements with the same hashvalue.
-     */
+    /** Map of all elements. */
     private final Map<K, HashEntry<K, V>> data;
 
     private static class HashEntry<K, V> implements Map.Entry<K, V> {
@@ -51,14 +49,11 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
         protected K key;
         /** The value */
         protected V value;
-        /** In case of a hash collision we can find the next one with the same hashCode faster */
-        protected HashEntry<K, V> next;
 
         public HashEntry(K key, V value) {
             this.hashCode = key.hashCode();
             this.value = value;
             this.key = key;
-            this.next = null;
         }
 
         @Override
@@ -98,7 +93,7 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
         @Override
         public int hashCode() {
             return (getKey() == null ? 0 : getKey().hashCode()) ^
-                    (getValue() == null ? 0 : getValue().hashCode());
+                   (getValue() == null ? 0 : getValue().hashCode());
         }
 
         @Override
@@ -116,8 +111,8 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
         size = 0;
         capacity = newCapacity;
         loadFactor = newLoadFactor;
-        hashLookup = new HashEntry[(int)(capacity * loadFactor)];
-        data = new HashMap<>(capacity, loadFactor);
+        hashLookup = new Map[(int) (capacity * loadFactor)];
+        data = Collections.synchronizedMap(new HashMap<>(capacity, loadFactor));
     }
 
     @Override
@@ -136,14 +131,12 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
 
     @Override
     public boolean containsKey(Object key) {
-        throw new UnsupportedOperationException();
-//        return false;
+        return data.containsKey(key);
     }
 
     @Override
     public boolean containsValue(Object value) {
-        throw new UnsupportedOperationException();
-//        return false;
+        return data.containsValue(value);
     }
 
     private boolean sameKey(Object key, HashEntry<K, V> hashEntry) {
@@ -162,11 +155,12 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
 
     private HashEntry<K, V> findHashEntry(Object key) {
         int index = hashIndex(key);
-        HashEntry<K, V> hashEntry = hashLookup[index];
-        while(hashEntry != null && !sameKey(key, hashEntry)) {
-            hashEntry = hashEntry.next;
+        Map<K, HashEntry<K, V>> sameHashValueMap = hashLookup[index];
+        if (sameHashValueMap != null) {
+            // This one IS synchronized
+            return sameHashValueMap.get(key);
         }
-        return hashEntry;
+        return null;
     }
 
     @Override
@@ -181,25 +175,27 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
     @Override
     public synchronized V put(K key, V value) {
         int index = hashIndex(key);
-        HashEntry<K, V> hashEntry = hashLookup[index];
-        HashEntry<K, V> prevHashEntry = null;
-        while(hashEntry != null && !sameKey(key, hashEntry)) {
-            prevHashEntry = hashEntry;
-            hashEntry = hashEntry.next;
-        }
+        Map<K, HashEntry<K, V>> sameHashValueMap = hashLookup[index];
 
-        if (hashEntry == null) {
+        if (sameHashValueMap == null) {
             // New entry with a previously unused hash value.
-            hashEntry = new HashEntry<>(key, value);
+            sameHashValueMap = Collections.synchronizedMap(new HashMap<>());
+            HashEntry<K, V> hashEntry = new HashEntry<>(key, value);
+            sameHashValueMap.put(key, hashEntry);
             data.put(key, hashEntry);
-            hashLookup[index] = hashEntry;
-            if (prevHashEntry != null) {
-                prevHashEntry.next = hashEntry;
-            }
+            hashLookup[index] = sameHashValueMap;
             return null;
         }
 
-        // So we have an existing entry for this key.
+        // So we have existing entry/ies for this hashValue.
+        HashEntry<K, V> hashEntry = sameHashValueMap.get(key);
+        if (hashEntry == null) {
+            // We do not have this value yet
+            hashEntry = new HashEntry<>(key, value);
+            sameHashValueMap.put(key, hashEntry);
+            data.put(key, hashEntry);
+            return null;
+        }
         V oldValue = hashEntry.getValue();
         hashEntry.setValue(value);
         return oldValue;
@@ -208,12 +204,13 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
     @Override
     public synchronized V remove(Object key) {
         int index = hashIndex(key);
-        HashEntry<K, V> hashEntry = hashLookup[index];
-        HashEntry<K, V> prevHashEntry = null;
-        while(hashEntry != null && !sameKey(key, hashEntry)) {
-            prevHashEntry = hashEntry;
-            hashEntry = hashEntry.next;
+        Map<K, HashEntry<K, V>> sameHashValueMap = hashLookup[index];
+
+        if (sameHashValueMap == null) {
+            return null;
         }
+
+        HashEntry<K, V> hashEntry = sameHashValueMap.get(key);
 
         if (hashEntry == null) {
             // It does not exist in the map
@@ -221,14 +218,11 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
         }
 
         // Found it.
-        if (prevHashEntry == null) {
-            // This means this one is the FIRST in the hash list.
-            // Make the second entry the one in the hashmap (if any)
-            hashLookup[index] = hashEntry.next;
-        } else {
-            prevHashEntry.next = hashEntry.next;
-        }
+        sameHashValueMap.remove(key);
         data.remove(key);
+        if (sameHashValueMap.isEmpty()) {
+            hashLookup[index] = null;
+        }
         return hashEntry.getValue();
     }
 
@@ -239,8 +233,6 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
 
     @Override
     public void clear() {
-        // Destroy the links
-        data.forEach((k,v) -> v.next = null);
         // Wipe the map
         data.clear();
         // Full wipe of the array.

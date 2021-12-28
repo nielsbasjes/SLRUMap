@@ -20,6 +20,7 @@ package nl.basjes.collections;
 import org.apache.commons.collections4.map.LRUMap;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -43,8 +44,12 @@ class TestConcurrentPerformance {
         }
 
         public String parse(String input) {
+            return parse(input, false);
+        }
+
+        public String parse(String input, boolean forceUpdateCache) {
             String output = cache.get(input);
-            if (output == null) {
+            if (output == null || forceUpdateCache) {
                 output = parseReally(input);
                 cache.put(input, output);
             }
@@ -83,23 +88,23 @@ class TestConcurrentPerformance {
         }
     }
 
-    public static class RunCachedTestCase extends Thread {
-        private final Analyzer analyzer;
-        private final String testCase;
-        private final long iterations;
-        private long nanosUsed;
+    public static abstract class TestCaseRunner extends Thread {
+        protected final Analyzer analyzer;
+        protected final String testCase;
+        protected final long iterations;
+        protected long nanosUsed;
 
-        RunCachedTestCase(Analyzer analyzer, String testCase, long iterations) {
+        TestCaseRunner(Analyzer analyzer, String testCase, long iterations) {
             this.analyzer = analyzer;
             this.testCase = testCase;
             this.iterations = iterations;
         }
 
+        public abstract void runner();
+
         public void run() {
             long start = System.nanoTime();
-            for (long i = 0; i < iterations; i++) {
-                analyzer.parse(testCase);
-            }
+            runner();
             long stop = System.nanoTime();
             nanosUsed = stop-start;
         }
@@ -113,6 +118,32 @@ class TestConcurrentPerformance {
         }
     }
 
+    public static class UpdateCachedTestCase extends TestCaseRunner {
+        UpdateCachedTestCase(Analyzer analyzer, String testCase, long iterations) {
+            super(analyzer, testCase, iterations);
+            analyzer.parse(testCase, true); // Force it to be in the cache
+        }
+
+        public void runner() {
+            for (long i = 0; i < iterations; i++) {
+                analyzer.parse(testCase, true);
+            }
+        }
+    }
+
+    public static class RunCachedTestCase extends TestCaseRunner {
+        RunCachedTestCase(Analyzer analyzer, String testCase, long iterations) {
+            super(analyzer, testCase, iterations);
+            analyzer.parse(testCase, true); // Force it to be in the cache
+        }
+
+        public void runner() {
+            for (long i = 0; i < iterations; i++) {
+                analyzer.parse(testCase);
+            }
+        }
+    }
+
     @Test
     void testMTPerformance_SLRUMap() throws InterruptedException {
         int cacheSize = 10000;
@@ -123,6 +154,7 @@ class TestConcurrentPerformance {
     }
 
 
+    @Disabled
     @Test
     void testMTPerformance_LRUMap() throws InterruptedException {
         int cacheSize = 10000;
@@ -144,18 +176,24 @@ class TestConcurrentPerformance {
         for (int i = 0; i < 5; i++) {
             LOG.info("Iteration {} : Start", i);
 
-            RunUNCachedTestCases fireTests = new RunUNCachedTestCases(analyzer, 1, 1000);
+            List<Thread> fireTests = Arrays.asList(
+                    new RunUNCachedTestCases(analyzer, 1, 1000),
+                    new RunUNCachedTestCases(analyzer, 1, 1000),
+                    new UpdateCachedTestCase(analyzer, cachedTestCase, 1000),
+                    new UpdateCachedTestCase(analyzer, cachedTestCase, 1000)
+            );
+
             List<RunCachedTestCase> runCachedTestCases = Arrays.asList(
-//                    new RunCachedTestCase(analyzer, cachedTestCase, 10_000_000),
-//                    new RunCachedTestCase(analyzer, cachedTestCase, 10_000_000),
-//                    new RunCachedTestCase(analyzer, cachedTestCase, 10_000_000),
-//                    new RunCachedTestCase(analyzer, cachedTestCase, 10_000_000),
-//                    new RunCachedTestCase(analyzer, cachedTestCase, 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase, 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase, 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase, 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase, 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase, 10_000_000)
+                    new RunCachedTestCase(analyzer, cachedTestCase+"9", 10_000_000),
+                    new RunCachedTestCase(analyzer, cachedTestCase+"8", 10_000_000),
+                    new RunCachedTestCase(analyzer, cachedTestCase+"7", 10_000_000),
+                    new RunCachedTestCase(analyzer, cachedTestCase+"6", 10_000_000),
+                    new RunCachedTestCase(analyzer, cachedTestCase+"5", 10_000_000),
+                    new RunCachedTestCase(analyzer, cachedTestCase+"4", 10_000_000),
+                    new RunCachedTestCase(analyzer, cachedTestCase+"3", 10_000_000),
+                    new RunCachedTestCase(analyzer, cachedTestCase+"2", 10_000_000),
+                    new RunCachedTestCase(analyzer, cachedTestCase+"1", 10_000_000),
+                    new RunCachedTestCase(analyzer, cachedTestCase+"0", 10_000_000)
                 );
 
             // Wipe the cache for the new run.
@@ -165,11 +203,13 @@ class TestConcurrentPerformance {
             analyzer.parse(cachedTestCase);
 
             // Start both
-            fireTests.start();
+            fireTests.forEach(Thread::start);
             runCachedTestCases.forEach(Thread::start);
 
             // Wait for both to finish
-            fireTests.join();
+            for (Thread ctc : fireTests) {
+                ctc.join();
+            }
             for (RunCachedTestCase ctc : runCachedTestCases) {
                 ctc.join();
             }

@@ -19,9 +19,6 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
     /** Load factor, normally 0.75 */
     private float loadFactor = DEFAULT_LOAD_FACTOR;
 
-    /** The size of the map */
-    private int size;
-
     // The maximum number of entries in the LRU
     private final int capacity;
 
@@ -50,10 +47,17 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
         /** The value */
         protected V value;
 
+        protected long lastTouchTimestamp;
+
         public HashEntry(K key, V value) {
             this.hashCode = key.hashCode();
             this.value = value;
             this.key = key;
+            touch();
+        }
+
+        public void touch() {
+            lastTouchTimestamp = System.nanoTime();
         }
 
         @Override
@@ -108,7 +112,6 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
 
     @SuppressWarnings("unchecked") // Because of Generic array creation
     public SLRUCache(int newCapacity, float newLoadFactor) {
-        size = 0;
         capacity = newCapacity;
         loadFactor = newLoadFactor;
         hashLookup = new Map[(int) (capacity * loadFactor)];
@@ -169,6 +172,7 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
         if (hashEntry == null) {
             return null;
         }
+        hashEntry.touch();
         return hashEntry.getValue();
     }
 
@@ -184,6 +188,7 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
             sameHashValueMap.put(key, hashEntry);
             data.put(key, hashEntry);
             hashLookup[index] = sameHashValueMap;
+            flushLRU();
             return null;
         }
 
@@ -194,6 +199,7 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
             hashEntry = new HashEntry<>(key, value);
             sameHashValueMap.put(key, hashEntry);
             data.put(key, hashEntry);
+            flushLRU();
             return null;
         }
         V oldValue = hashEntry.getValue();
@@ -225,6 +231,32 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
         }
         return hashEntry.getValue();
     }
+
+    /**
+     * Make sure the LRU follows the configured maximum number of entries.
+     * @return How may were removed.
+     */
+    synchronized int flushLRU() {
+        int removed = 0;
+        while (size() > capacity) {
+            HashEntry<K, V> oldestHashEntry = null;
+            for (HashEntry<K, V> hashEntry : data.values()) {
+                if (oldestHashEntry == null) {
+                    oldestHashEntry = hashEntry;
+                    continue;
+                }
+                if (oldestHashEntry.lastTouchTimestamp > hashEntry.lastTouchTimestamp) {
+                    oldestHashEntry = hashEntry;
+                }
+            }
+            if (oldestHashEntry != null) {
+                remove(oldestHashEntry.key);
+            }
+            removed++;
+        }
+        return removed;
+    }
+
 
     @Override
     public void putAll(Map<? extends K, ? extends V> copy) {

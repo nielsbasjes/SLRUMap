@@ -23,11 +23,14 @@ import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * This test is intended to see if there is a performance difference for cached hits
@@ -121,7 +124,6 @@ class TestConcurrentPerformance {
     public static class UpdateCachedTestCase extends TestCaseRunner {
         UpdateCachedTestCase(Analyzer analyzer, String testCase, long iterations) {
             super(analyzer, testCase, iterations);
-            analyzer.parse(testCase, true); // Force it to be in the cache
         }
 
         public void runner() {
@@ -132,35 +134,32 @@ class TestConcurrentPerformance {
     }
 
     public static class RunCachedTestCase extends TestCaseRunner {
+        String expectedResult;
         RunCachedTestCase(Analyzer analyzer, String testCase, long iterations) {
             super(analyzer, testCase, iterations);
-            analyzer.parse(testCase, true); // Force it to be in the cache
+            expectedResult = analyzer.parse(testCase, true);// Force it to be in the cache
         }
 
         public void runner() {
             for (long i = 0; i < iterations; i++) {
-                analyzer.parse(testCase);
+                String result = analyzer.parse(testCase);
+                assertEquals(expectedResult, result);
             }
         }
     }
 
+    int cacheSize = 100;
+
     @Test
     void testMTPerformance_SLRUMap() throws InterruptedException {
-        int cacheSize = 10000;
-
         Map<String, String> cacheInstance = new SLRUCache<>(cacheSize);
-
         runTest(cacheInstance);
     }
-
 
     @Disabled
     @Test
     void testMTPerformance_LRUMap() throws InterruptedException {
-        int cacheSize = 10000;
-
         Map<String, String> cacheInstance = Collections.synchronizedMap(new LRUMap<>(cacheSize));
-
         runTest(cacheInstance);
     }
 
@@ -176,25 +175,15 @@ class TestConcurrentPerformance {
         for (int i = 0; i < 5; i++) {
             LOG.info("Iteration {} : Start", i);
 
-            List<Thread> fireTests = Arrays.asList(
-                    new RunUNCachedTestCases(analyzer, 1, 1000),
-                    new RunUNCachedTestCases(analyzer, 1, 1000),
-                    new UpdateCachedTestCase(analyzer, cachedTestCase, 1000),
-                    new UpdateCachedTestCase(analyzer, cachedTestCase, 1000)
-            );
+            List<Thread> runCacheUpdates = new ArrayList<>();
+            for (int j = 0 ; j < 10 ; j++) {
+                runCacheUpdates.add(new RunUNCachedTestCases(analyzer, (j*1000) + 1, (j+1)*1000));
+            }
 
-            List<RunCachedTestCase> runCachedTestCases = Arrays.asList(
-                    new RunCachedTestCase(analyzer, cachedTestCase+"9", 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase+"8", 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase+"7", 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase+"6", 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase+"5", 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase+"4", 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase+"3", 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase+"2", 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase+"1", 10_000_000),
-                    new RunCachedTestCase(analyzer, cachedTestCase+"0", 10_000_000)
-                );
+            List<RunCachedTestCase> runCachedTestCases = new ArrayList<>();
+            for (int j = 0 ; j < 10 ; j++) {
+                runCachedTestCases.add(new RunCachedTestCase(analyzer, cachedTestCase+"-"+j, 10_000_000));
+            }
 
             // Wipe the cache for the new run.
             analyzer.clearCache();
@@ -202,12 +191,12 @@ class TestConcurrentPerformance {
             // Now parse and cache the precached testcase.
             analyzer.parse(cachedTestCase);
 
-            // Start both
-            fireTests.forEach(Thread::start);
+            // Start
+            runCacheUpdates.forEach(Thread::start);
             runCachedTestCases.forEach(Thread::start);
 
-            // Wait for both to finish
-            for (Thread ctc : fireTests) {
+            // Wait for all to finish
+            for (Thread ctc : runCacheUpdates) {
                 ctc.join();
             }
             for (RunCachedTestCase ctc : runCachedTestCases) {

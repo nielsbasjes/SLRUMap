@@ -4,7 +4,6 @@ import org.apache.commons.collections4.map.LRUMap;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -97,10 +96,11 @@ class TestBasicLRUMapOperations {
 
         map.put("K4", "V4");
         map.put("K5", "V5");
+        assertEquals("V2", map.get("K2"));
         map.put("K6", "V6");
 
         assertEquals(CAPACITY, map.size());
-        assertNull(map.get("K2")); // K2 must be gone now
+        assertNull(map.get("K3")); // K3 must be gone now
     }
 
 }

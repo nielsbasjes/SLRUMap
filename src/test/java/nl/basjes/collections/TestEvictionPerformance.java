@@ -87,7 +87,7 @@ class TestEvictionPerformance {
         long stop = System.nanoTime();
         nanosUsed = stop-start;
 
-        LOG.info("[%15s(%8d)] %d evictions: Took %12dns (%6dms) = %8dns(~%6.2fms) each.",
+        LOG.info("[%15s(%8d)] %d evictions: Took %12dns (%6dms) = %8dns(~%6.3fms) each.",
                 cacheInstance.getClass().getSimpleName(), cacheSize,
                 iterations,
                 nanosUsed,                          (nanosUsed) / 1_000_000L,

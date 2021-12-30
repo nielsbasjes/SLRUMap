@@ -182,6 +182,7 @@ class TestConcurrentPerformance {
     }
 
 
+    @Disabled
     @ParameterizedTest(name = "Test SLRUMap for cachesize {0}")
     @MethodSource("cacheSizes")
     void testMTPerformance_SLRUMap(int cacheSize) throws InterruptedException {

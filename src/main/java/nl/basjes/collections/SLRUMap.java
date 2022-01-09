@@ -10,13 +10,13 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-public class SLRUCache<K, V> implements Map<K, V>, Serializable {
+public class SLRUMap<K, V> implements Map<K, V>, Serializable {
 
     /** The default load factor to use */
     protected static final float DEFAULT_LOAD_FACTOR = 0.75f;
 
     /** The maximum capacity allowed */
-// FIXME: Use this   protected static final int MAXIMUM_CAPACITY = 1 << 30;
+//    public static final int MAXIMUM_CAPACITY = 1 << 30;
 
     // The maximum number of entries in the LRU
     private final int capacity;
@@ -42,15 +42,10 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
         return hashIndex(cleanHashCode(key));
     }
 
-    long statsPut = 0;
-    long statsGet = 0;
-    long statsEvict = 0;
-
-
     /** Raw map of all elements. */
-    private final HashMap<K, HashEntry<K, V>> data;
+    private HashMap<K, HashEntry<K, V>> data;
 
-    private static class HashEntry<K, V> implements Map.Entry<K, V> {
+    private static class HashEntry<K, V> implements Map.Entry<K, V>, Serializable {
         /** The hash code of the key */
         protected int hashCode;
         /** The key */
@@ -60,7 +55,7 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
 
         protected long lastTouchTimestamp;
 
-        private SameHashValueMap<K,V> parent;
+        private final SameHashValueMap<K,V> parent;
 
         public HashEntry(SameHashValueMap<K,V> parent, K key, V value) {
             this.parent = parent;
@@ -180,14 +175,14 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
         }
     }
 
-    public SLRUCache(int newCapacity) {
+    public SLRUMap(int newCapacity) {
         this(newCapacity, DEFAULT_LOAD_FACTOR);
     }
 
     @SuppressWarnings("unchecked") // Because of Generic array creation
-    public SLRUCache(int newCapacity, float loadFactor) {
+    public SLRUMap(int newCapacity, float loadFactor) {
         capacity = newCapacity;
-        hashLookup = new SameHashValueMap[(int) (capacity * loadFactor)];
+        hashLookup = new SameHashValueMap[(int) (capacity / loadFactor)];
         data = new HashMap<>(capacity, loadFactor);
     }
 
@@ -227,7 +222,6 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
 
     @Override
     public V get(Object key) {
-        ++statsGet;
         HashEntry<K, V> hashEntry = findHashEntry(key);
         if (hashEntry == null) {
             return null;
@@ -238,7 +232,6 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
 
     @Override
     public synchronized V put(K key, V value) {
-        ++statsPut;
         int index = hashIndex(key);
         SameHashValueMap<K, V> sameHashValueMap = hashLookup[index];
 
@@ -249,7 +242,7 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
 //            sameHashValueMap.put(key, hashEntry);
             data.put(key, hashEntry);
             hashLookup[index] = sameHashValueMap;
-            statsEvict += flushLRU();
+            flushLRU();
             return null;
         }
 
@@ -260,7 +253,7 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
             hashEntry = new HashEntry<>(sameHashValueMap, key, value);
 //            sameHashValueMap.put(key, hashEntry);
             data.put(key, hashEntry);
-            statsEvict += flushLRU();
+            flushLRU();
             return null;
         }
 
@@ -299,7 +292,7 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
      * Make sure the LRU follows the configured maximum number of entries.
      * @return How may were removed.
      */
-    synchronized int flushLRU() {
+    public int flushLRU() {
         int removed = 0;
         while (size() > capacity) {
             SameHashValueMap<K, V> oldestSameHashValueMap = null;
@@ -323,21 +316,22 @@ public class SLRUCache<K, V> implements Map<K, V>, Serializable {
                         .filter(hv -> hv.lastTouchTimestamp == oldestTouchTimestamp)
                         .collect(Collectors.toList());
 
-                for (HashEntry<K, V> removeEntry : remove) {
-                    oldestSameHashValueMap.remove(removeEntry.key);
-                    data.remove(removeEntry.key);
-                }
-                if (oldestSameHashValueMap.isEmpty()) {
-                    hashLookup[hashIndex(oldestSameHashValueMap.hashCode)] = null;
-                } else {
-                    oldestSameHashValueMap.touch();
+                synchronized (this) {
+                    for (HashEntry<K, V> removeEntry : remove) {
+                        oldestSameHashValueMap.remove(removeEntry.key);
+                        data.remove(removeEntry.key);
+                    }
+                    if (oldestSameHashValueMap.isEmpty()) {
+                        hashLookup[hashIndex(oldestSameHashValueMap.hashCode)] = null;
+                    } else {
+                        oldestSameHashValueMap.touch();
+                    }
                 }
             }
             removed++;
         }
         return removed;
     }
-
 
     @Override
     public void putAll(Map<? extends K, ? extends V> copy) {

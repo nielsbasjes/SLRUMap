@@ -19,6 +19,7 @@
     <log4j2.version>2.17.0</log4j2.version>
     <junit5.version>5.8.2</junit5.version>
     <hamcrest-core.version>2.2</hamcrest-core.version>
+    <kryo5.version>5.2.1</kryo5.version>
   </properties>
 
   <dependencyManagement>
@@ -36,9 +37,29 @@
   <dependencies>
 
     <dependency>
+      <groupId>nl.basjes.parse.useragent</groupId>
+      <artifactId>yauaa</artifactId>
+      <version>6.7</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.esotericsoftware</groupId>
+      <artifactId>kryo</artifactId>
+      <version>${kryo5.version}</version>
+      <optional>true</optional>
+    </dependency>
+
+    <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-collections4</artifactId>
       <version>4.4</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <version>1.18.22</version>
+      <scope>provided</scope>
     </dependency>
 
     <dependency>

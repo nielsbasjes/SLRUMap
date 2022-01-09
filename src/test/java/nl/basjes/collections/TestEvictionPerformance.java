@@ -20,18 +20,12 @@ package nl.basjes.collections;
 import org.apache.commons.collections4.map.LRUMap;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.junit.jupiter.api.Disabled;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.IntStream;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * This test is intended to see what the eviction performance is.
@@ -42,18 +36,24 @@ class TestEvictionPerformance {
     public static Iterable<Integer> cacheSizes() {
         return List.of(
                  100
+                ,200
+                ,500
               ,1_000
+              ,2_000
+              ,5_000
              ,10_000
+             ,20_000
+             ,50_000
             ,100_000
-//          ,1_000_000
-//         ,10_000_000
+            ,200_000
+            ,500_000
         );
     }
 
     @ParameterizedTest(name = "Test Evict SLRUMap size {0}")
     @MethodSource("cacheSizes")
     void testSLRUMap(Integer cacheSize) throws InterruptedException {
-        Map<String, String> cacheInstance = new SLRUCache<>(cacheSize);
+        Map<String, String> cacheInstance = new SLRUMap<>(cacheSize);
         runTest(cacheInstance, cacheSize);
     }
 
@@ -72,7 +72,7 @@ class TestEvictionPerformance {
     }
 
     void runTest(Map<String, String> cacheInstance, int cacheSize) throws InterruptedException {
-        long iterations = 10_000;
+        long iterations = 1_000;
         long nanosUsed;
 
         // Fill the entire cache to the limit (+10 to be sure it already overflows and evicts)

@@ -17,29 +17,31 @@
 
 package nl.basjes.collections;
 
+import lombok.Getter;
 import org.apache.commons.collections4.map.LRUMap;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.Disabled;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * This test is intended to see if there is a performance difference for cached hits
  * if there are a lot of uncached hits also.
  */
+@Disabled("These performance tests are too heavy to run automatically.")
 class TestConcurrentPerformance {
     private static final Logger LOG = LogManager.getFormatterLogger(TestConcurrentPerformance.class);
 
@@ -65,7 +67,7 @@ class TestConcurrentPerformance {
 
         public String parseReally(String input) {
             try {
-                Thread.sleep(1);// Wait 1 millisecond
+                Thread.sleep(0, 500_000 ); // Don't parse, just wait 0.5 millisecond
             } catch (InterruptedException e) {
                 // Ignore
             }
@@ -77,21 +79,45 @@ class TestConcurrentPerformance {
         }
     }
 
+    public static class StatsMap<K,V> implements Map<K, V> {
+
+        private final Map<K, V> map;
+
+        public StatsMap(Map<K, V> map) {
+            this.map = map;
+        }
+
+        @Getter private long callsToSize          = 0; @Override public int                size()                                  { callsToSize          ++; return map.size();               }
+        @Getter private long callsToIsEmpty       = 0; @Override public boolean            isEmpty()                               { callsToIsEmpty       ++; return map.isEmpty();            }
+        @Getter private long callsToContainsKey   = 0; @Override public boolean            containsKey(Object key)                 { callsToContainsKey   ++; return map.containsKey(key);     }
+        @Getter private long callsToContainsValue = 0; @Override public boolean            containsValue(Object value)             { callsToContainsValue ++; return map.containsValue(value); }
+        @Getter private long callsToGet           = 0; @Override public V                  get(Object key)                         { callsToGet           ++; return map.get(key);             }
+        @Getter private long callsToPut           = 0; @Override public V                  put(K key, V value)                     { callsToPut           ++; return map.put(key, value);      }
+        @Getter private long callsToRemove        = 0; @Override public V                  remove(Object key)                      { callsToRemove        ++; return map.remove(key);          }
+        @Getter private long callsToPutAll        = 0; @Override public void               putAll(Map<? extends K, ? extends V> m) { callsToPutAll        ++; map.putAll(m);                   }
+        @Getter private long callsToClear         = 0; @Override public void               clear()                                 { callsToClear         ++; map.clear();                     }
+        @Getter private long callsToKeySet        = 0; @Override public Set<K>             keySet()                                { callsToKeySet        ++; return map.keySet();             }
+        @Getter private long callsToValues        = 0; @Override public Collection<V>      values()                                { callsToValues        ++; return map.values();             }
+        @Getter private long callsToEntrySet      = 0; @Override public Set<Entry<K, V>>   entrySet()                              { callsToEntrySet      ++; return map.entrySet();           }
+    }
+
+
     public static class RunUNCachedTestCases extends Thread {
         private final Analyzer analyzer;
         private final int start;
-        private final int end;
+        private final int count;
 
-        public RunUNCachedTestCases(Analyzer analyzer, int start, int end) {
+        public RunUNCachedTestCases(Analyzer analyzer, int start, int count) {
             this.analyzer = analyzer;
             this.start = start;
-            this.end = end;
+            this.count = count;
         }
 
         public void run() {
             IntStream
-                    .range(start, end)
+                    .range(start, start + count)
                     .forEach(value -> analyzer.parse("TEST:"+value));
+//            LOG.info("Task %s finished.", this.getClass().getSimpleName());
         }
     }
 
@@ -124,6 +150,7 @@ class TestConcurrentPerformance {
                 long stop = System.nanoTime();
                 nanosUsed = stop-start;
             }
+//            LOG.info("Task %s finished.", this.getClass().getSimpleName());
         }
 
         public long getIterations() {
@@ -169,36 +196,30 @@ class TestConcurrentPerformance {
         }
     }
 
-    int cacheSize = 1000;
-
     public static Iterable<Integer> cacheSizes() {
         return List.of(
-//              100,
-//             1000,
             10000,
-            50000,
-           100000
+//            20000,
+            50000
         );
     }
 
 
-    @Disabled
     @ParameterizedTest(name = "Test SLRUMap for cachesize {0}")
     @MethodSource("cacheSizes")
     void testMTPerformance_SLRUMap(int cacheSize) throws InterruptedException {
-        Map<String, String> cacheInstance = new SLRUCache<>(cacheSize);
+        StatsMap<String, String> cacheInstance = new StatsMap<>(new SLRUMap<>(cacheSize));
         runTest(cacheInstance,cacheSize);
     }
 
-    @Disabled
     @ParameterizedTest(name = "Test LRUMap for cachesize {0}")
     @MethodSource("cacheSizes")
     void testMTPerformance_LRUMap(int cacheSize) throws InterruptedException {
-        Map<String, String> cacheInstance = Collections.synchronizedMap(new LRUMap<>(cacheSize));
+        StatsMap<String, String> cacheInstance = new StatsMap<>(Collections.synchronizedMap(new LRUMap<>(cacheSize)));
         runTest(cacheInstance,  cacheSize);
     }
 
-    void runTest(Map<String, String> cacheInstance, int cacheSize) throws InterruptedException {
+    void runTest(StatsMap<String, String> cacheInstance, int cacheSize) throws InterruptedException {
         // This testcase does not occur in the rest of the testcases.
         String cachedTestCase = "Cached Test Case";
 
@@ -207,24 +228,24 @@ class TestConcurrentPerformance {
         long totalIterations = 0;
         long totalNanosUsed = 0;
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 1; i++) {
 //            LOG.info("Iteration {} : Start", i);
-
-            List<Thread> runCacheUpdates = new ArrayList<>();
-            for (int j = 0 ; j < 10 ; j++) {
-                runCacheUpdates.add(new RunUNCachedTestCases(analyzer, (j*10000) + 1, (j+1)*10000));
-            }
-
-            List<RunCachedTestCase> runCachedTestCases = new ArrayList<>();
-            for (int j = 0 ; j < 10 ; j++) {
-                runCachedTestCases.add(new RunCachedTestCase(j, analyzer, cachedTestCase+"-"+j, 10_000_000));
-            }
 
             // Wipe the cache for the new run.
             analyzer.clearCache();
 
-            // Now parse and cache the precached testcase.
-            analyzer.parse(cachedTestCase);
+            List<Thread> runCacheUpdates = new ArrayList<>();
+            for (int j = 0 ; j < 10 ; j++) {
+                runCacheUpdates.add(new RunUNCachedTestCases(analyzer, (j*2000) + 1, 2000));
+            }
+
+            List<RunCachedTestCase> runCachedTestCases = new ArrayList<>();
+            int cacheCases = 10;
+            for (int j = 0 ; j < cacheCases ; j++) {
+                runCachedTestCases.add(new RunCachedTestCase(j, analyzer, cachedTestCase+"-"+j, 50_000_000));
+                // Now parse and cache the precached testcase.
+                analyzer.parse(cachedTestCase+"-"+j);
+            }
 
             // Start
             runCacheUpdates.forEach(Thread::start);
@@ -251,21 +272,12 @@ class TestConcurrentPerformance {
 
         }
 
-        long statsGet   = -1;
-        long statsPut   = -1;
-        long statsEvict = -1;
-        if (cacheInstance instanceof SLRUCache) {
-            SLRUCache<?,?> slruCache = (SLRUCache<?, ?>) cacheInstance;
-            statsGet   = slruCache.statsGet;
-            statsPut   = slruCache.statsPut;
-            statsEvict = slruCache.statsEvict;
-        }
-
-        LOG.info("CacheSize: %6d --> Total %10dns (%5.1fms) = %8dns each (%6.3fms) Stats:(G=%d | P=%d | E=%d)",
+        LOG.info("CacheSize: %6d --> Total %10dns (%5.1fms) = %8dns each (%6.3fms) Stats:(G=%d | P=%d)",
                 cacheSize,
                 totalNanosUsed,                 ((float)totalNanosUsed                ) / 1_000_000L,
                 totalNanosUsed/totalIterations, ((float)totalNanosUsed/totalIterations) / 1_000_000L,
-                statsGet, statsPut, statsEvict
+                cacheInstance.getCallsToGet(),
+                cacheInstance.getCallsToPut()
                 );
     }
 }

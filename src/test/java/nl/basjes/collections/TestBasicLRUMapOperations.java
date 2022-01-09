@@ -4,6 +4,7 @@ import org.apache.commons.collections4.map.LRUMap;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -34,8 +35,9 @@ class TestBasicLRUMapOperations {
     public static Iterable<TestParameter> maps() {
         return List.of(
 //            new HashMap<>(100),
-                new TestParameter("LRUMap", new LRUMap<>(CAPACITY)),
-                new TestParameter("SLRUCache", new SLRUCache<>(CAPACITY))
+                new TestParameter("Sync(LRUMap)",   Collections.synchronizedMap(new LRUMap<>(CAPACITY))),
+                new TestParameter("LRUMap",         new LRUMap<>(CAPACITY)),
+                new TestParameter("SLRUCache",      new SLRUMap<>(CAPACITY))
         );
     }
 

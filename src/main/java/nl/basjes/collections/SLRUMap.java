@@ -66,7 +66,7 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
             touch();
         }
 
-        public synchronized void touch() {
+        public void touch() {
             lastTouchTimestamp = System.nanoTime();
             parent.touch();
         }
@@ -165,13 +165,25 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
             return Objects.hash(super.hashCode(), hashCode);
         }
 
+        boolean oldestTouchTimestampIsDirty = true;
+
         public synchronized void touch() {
-            oldestTouchTimestamp = super
-                    .values()
-                    .stream()
-                    .map(hashEntry -> hashEntry.lastTouchTimestamp)
-                    .min(Long::compareTo)
-                    .orElse(0L);
+            oldestTouchTimestampIsDirty = true;
+        }
+
+        public long getOldestTouchTimestamp() {
+            if (oldestTouchTimestampIsDirty) {
+                synchronized (this) {
+                    oldestTouchTimestamp = super
+                            .values()
+                            .stream()
+                            .map(hashEntry -> hashEntry.lastTouchTimestamp)
+                            .min(Long::compareTo)
+                            .orElse(0L);
+                }
+                oldestTouchTimestampIsDirty = false;
+            }
+            return oldestTouchTimestamp;
         }
     }
 
@@ -302,14 +314,15 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
                 }
                 if (oldestSameHashValueMap == null) {
                     oldestSameHashValueMap = sameHashValueMap;
+                    oldestSameHashValueMap.getOldestTouchTimestamp(); // Make sure this one is up-to-date.
                 }
-                if (oldestSameHashValueMap.oldestTouchTimestamp > sameHashValueMap.oldestTouchTimestamp) {
+                if (oldestSameHashValueMap.oldestTouchTimestamp > sameHashValueMap.getOldestTouchTimestamp()) {
                     oldestSameHashValueMap = sameHashValueMap;
                 }
             }
 
             if (oldestSameHashValueMap != null) {
-                long oldestTouchTimestamp = oldestSameHashValueMap.oldestTouchTimestamp;
+                long oldestTouchTimestamp = oldestSameHashValueMap.getOldestTouchTimestamp();
                 List<HashEntry<K,V>> remove =
                         oldestSameHashValueMap
                         .values().stream()
@@ -349,18 +362,15 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
     @Override
     public Set<K> keySet() {
         throw new UnsupportedOperationException();
-//        return false;
     }
 
     @Override
     public Collection<V> values() {
         throw new UnsupportedOperationException();
-//        return false;
     }
 
     @Override
     public Set<Entry<K, V>> entrySet() {
         throw new UnsupportedOperationException();
-//        return false;
     }
 }

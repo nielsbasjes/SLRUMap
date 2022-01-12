@@ -1,8 +1,5 @@
 package nl.basjes.collections.performance;
 
-import lombok.SneakyThrows;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.Disabled;
 
 import java.util.ArrayList;
@@ -13,11 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Disabled("These performance tests are too heavy to run automatically.")
 public class TestConcurrentPerformance extends PerformanceBase {
-    private static final Logger LOG = LogManager.getFormatterLogger(TestConcurrentPerformance.class);
 
-    @SneakyThrows
     @Override
-    void runTest(String name, Map<String, String> cacheInstance, int cacheSize) {
+    void runTest(String name, Map<String, String> cacheInstance, int cacheSize) throws InterruptedException {
         // This testcase does not occur in the rest of the testcases.
         String cachedTestCase = "Cached Test Case";
 

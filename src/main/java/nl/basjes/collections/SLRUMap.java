@@ -12,7 +12,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 public class SLRUMap<K extends Serializable, V extends Serializable> implements Map<K, V>, Serializable {
@@ -21,7 +20,7 @@ public class SLRUMap<K extends Serializable, V extends Serializable> implements 
     protected static final float DEFAULT_LOAD_FACTOR = 0.75f;
 
     /** The maximum capacity allowed */
-//    public static final int MAXIMUM_CAPACITY = 1 << 30;
+    public static final int MAXIMUM_CAPACITY = 10_000_000;
 
     // The maximum number of entries in the LRU
     private final int capacity;
@@ -72,7 +71,6 @@ public class SLRUMap<K extends Serializable, V extends Serializable> implements 
 
         public void touch() {
             lastTouchTimestamp = System.nanoTime();
-            mySameHashIndexMap.touch();
         }
 
         public V setValue(final V newValue) {
@@ -110,8 +108,6 @@ public class SLRUMap<K extends Serializable, V extends Serializable> implements 
     private static class SameHashIndexMap<K extends Serializable, V extends Serializable> extends HashMap<K, LRUEntry<K, V>> {
         /** The hash code of the key */
         protected int index;
-
-        protected long oldestTouchTimestamp;
 
         public SameHashIndexMap(int index) {
             super();
@@ -151,43 +147,30 @@ public class SLRUMap<K extends Serializable, V extends Serializable> implements 
         public int hashCode() {
             return Objects.hash(super.hashCode(), index);
         }
-
-        boolean oldestTouchTimestampIsDirty = true;
-
-        public synchronized void touch() {
-            oldestTouchTimestampIsDirty = true;
-        }
-
-        public long getOldestTouchTimestamp() {
-            if (oldestTouchTimestampIsDirty) {
-                synchronized (this) {
-                    oldestTouchTimestamp = super
-                            .values()
-                            .stream()
-                            .map(lruEntry -> lruEntry.lastTouchTimestamp)
-                            .min(Long::compareTo)
-                            .orElse(0L);
-                }
-                oldestTouchTimestampIsDirty = false;
-            }
-            return oldestTouchTimestamp;
-        }
     }
 
     public SLRUMap(int newCapacity) {
         this(newCapacity, DEFAULT_LOAD_FACTOR, DEFAULT_FLUSH_SIZE);
     }
 
-    public SLRUMap(int newCapacity, int minFlushSize) {
-        this(newCapacity, DEFAULT_LOAD_FACTOR, minFlushSize);
+    public SLRUMap(int newCapacity, float loadFactor) {
+        this(newCapacity, loadFactor, DEFAULT_FLUSH_SIZE);
+    }
+
+    public SLRUMap(int newCapacity, int flushSize) {
+        this(newCapacity, DEFAULT_LOAD_FACTOR, flushSize);
     }
 
     @SuppressWarnings("unchecked") // Because of Generic array creation
-    public SLRUMap(int newCapacity, float loadFactor, int minFlushSize) {
+    public SLRUMap(int newCapacity, float loadFactor, int flushSize) {
+        if (newCapacity > MAXIMUM_CAPACITY) {
+            throw new IllegalArgumentException("The capacity may not exceed " + MAXIMUM_CAPACITY + " because this will have an awful performance.");
+        }
+
         capacity = newCapacity;
         hashLookup = new SameHashIndexMap[(int) (capacity / loadFactor)];
         allEntries = new HashMap<>(capacity, loadFactor);
-        this.minFlushSize = minFlushSize;
+        this.flushSize = flushSize;
     }
 
     @Override
@@ -244,7 +227,7 @@ public class SLRUMap<K extends Serializable, V extends Serializable> implements 
             LRUEntry<K, V> lruEntry = new LRUEntry<>(sameHashIndexMap, key, value);
             allEntries.put(key, lruEntry);
             hashLookup[index] = sameHashIndexMap;
-            startFlushLRU();
+            aChangeHappened();
             return null;
         }
 
@@ -255,7 +238,7 @@ public class SLRUMap<K extends Serializable, V extends Serializable> implements 
             lruEntry = new LRUEntry<>(sameHashIndexMap, key, value);
 //            sameHashValueMap.put(key, hashEntry);
             allEntries.put(key, lruEntry);
-            startFlushLRU();
+            aChangeHappened();
             return null;
         }
 
@@ -288,18 +271,19 @@ public class SLRUMap<K extends Serializable, V extends Serializable> implements 
         return lruEntry.getValue();
     }
 
-    public int startFlushLRU() {
-        return flushLRU();
+    public int aChangeHappened() {
+        return flushLRU(getFlushSize());
     }
 
     public static final int DEFAULT_FLUSH_SIZE = 100;
-    int minFlushSize;
+    @Getter private final int flushSize;
 
     /**
      * Make sure the LRU follows the configured maximum number of entries.
      * @return How may were removed.
      */
-    public int flushLRU() {
+    public int flushLRU(int minFlushSize) {
+        minFlushSize = Math.max(0, minFlushSize);
         int removed = 0;
         while (size() > capacity + minFlushSize) {
             synchronized (this) {
@@ -312,9 +296,7 @@ public class SLRUMap<K extends Serializable, V extends Serializable> implements 
                         toRemove.remove();
                     }
                 }
-//                TreeSet<LRUEntry<K, V>> toRemove = new TreeSet<>(Comparator.comparingLong(o -> o.lastTouchTimestamp));
 
-//                toRemove.addAll(allEntries.values());
                 for (LRUEntry<K, V> entry : toRemove) {
                     K key = entry.getKey();
                     SameHashIndexMap<K, V> sameHashIndexMap = entry.getMySameHashIndexMap();
@@ -400,9 +382,8 @@ public class SLRUMap<K extends Serializable, V extends Serializable> implements 
     public synchronized String toString() {
         return "SLRUMap{" +
             "capacity=" + capacity +
-            ", hashLookup=" + Arrays.toString(hashLookup) +
             ", allEntries=" + allEntries +
-            ", minFlushSize=" + minFlushSize +
+            ", flushSize=" + flushSize +
             '}';
     }
 }

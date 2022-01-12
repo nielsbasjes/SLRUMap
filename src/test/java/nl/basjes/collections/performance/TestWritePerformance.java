@@ -17,6 +17,8 @@
 
 package nl.basjes.collections.performance;
 
+import org.junit.jupiter.api.Test;
+
 import java.util.Map;
 
 /**

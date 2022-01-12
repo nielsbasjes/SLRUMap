@@ -201,7 +201,7 @@ abstract class PerformanceBase {
     @ParameterizedTest(name = "Test SLRUMapBackgroundFlush for cachesize {0}")
     @MethodSource("cacheSizes")
     void testSLRUMapBackgroundFlush(int cacheSize) throws InterruptedException {
-        Map<String, String> cacheInstance = new SLRUMapBackgroundFlush<>(cacheSize, 0);
+        Map<String, String> cacheInstance = new SLRUMapBackgroundFlush<>(cacheSize);
         runTest("SLRUMap BG", cacheInstance, cacheSize);
     }
 

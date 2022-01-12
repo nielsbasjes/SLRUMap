@@ -8,23 +8,24 @@ public class SLRUMapBackgroundFlush<K extends Serializable, V extends Serializab
         super(newCapacity);
     }
 
-    public SLRUMapBackgroundFlush(int newCapacity, int minFlushSize) {
-        super(newCapacity, minFlushSize);
+    public SLRUMapBackgroundFlush(int newCapacity, int flushSize) {
+        super(newCapacity, flushSize);
     }
 
-    public SLRUMapBackgroundFlush(int newCapacity, float loadFactor, int minFlushSize) {
-        super(newCapacity, loadFactor, minFlushSize);
+    public SLRUMapBackgroundFlush(int newCapacity, float loadFactor, int flushSize) {
+        super(newCapacity, loadFactor, flushSize);
     }
 
     AtomicBoolean flushIsRunning = new AtomicBoolean(false);
 
     @Override
-    public int startFlushLRU() {
-        if (size() > getCapacity() + minFlushSize) {
+    public int aChangeHappened() {
+        int flushSize = getFlushSize();
+        if (size() > getCapacity() + flushSize) {
             if (flushIsRunning.compareAndSet(false, true)) {
                 new Thread(() -> {
                     try {
-                        flushLRU();
+                        flushLRU(flushSize);
                     } finally {
                         flushIsRunning.set(false);
                     }

@@ -1,16 +1,21 @@
 package nl.basjes.collections;
 
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
-public class SLRUMap<K, V> implements Map<K, V>, Serializable {
+public class SLRUMap<K extends Serializable, V extends Serializable> implements Map<K, V>, Serializable {
 
     /** The default load factor to use */
     protected static final float DEFAULT_LOAD_FACTOR = 0.75f;
@@ -22,7 +27,7 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
     private final int capacity;
 
     /** Hash based lookup for fast and unsynchronized retrieval */
-    private final SameHashValueMap<K, V>[] hashLookup;
+    private final SameHashIndexMap<K, V>[] hashLookup;
 
     private static int cleanHashCode(Object key) {
         if (key == null) {
@@ -35,7 +40,7 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
         if (hashCode == Integer.MIN_VALUE) {
             hashCode = 0;
         }
-        return Math.abs(cleanHashCode(hashCode)) % hashLookup.length;
+        return Math.abs(hashCode) % hashLookup.length;
     }
 
     private int hashIndex(Object key) {
@@ -43,24 +48,23 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
     }
 
     /** Raw map of all elements. */
-    private HashMap<K, HashEntry<K, V>> data;
+    private final HashMap<K, LRUEntry<K, V>> allEntries;
 
-    private static class HashEntry<K, V> implements Map.Entry<K, V>, Serializable {
-        /** The hash code of the key */
-        protected int hashCode;
+
+
+    static class LRUEntry<K extends Serializable, V extends Serializable> implements Serializable {
         /** The key */
-        protected K key;
+        @Getter private final K key;
         /** The value */
-        protected V value;
+        @Getter private V value;
 
-        protected long lastTouchTimestamp;
+        private long lastTouchTimestamp;
 
-        private final SameHashValueMap<K,V> parent;
+        @Getter private final SameHashIndexMap<K,V> mySameHashIndexMap;
 
-        public HashEntry(SameHashValueMap<K,V> parent, K key, V value) {
-            this.parent = parent;
-            this.parent.put(key, this);
-            this.hashCode = key.hashCode();
+        public LRUEntry(SameHashIndexMap<K,V> mySameHashIndexMap, K key, V value) {
+            this.mySameHashIndexMap = mySameHashIndexMap;
+            this.mySameHashIndexMap.put(key, this);
             this.value = value;
             this.key = key;
             touch();
@@ -68,23 +72,9 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
 
         public void touch() {
             lastTouchTimestamp = System.nanoTime();
-            parent.touch();
+            mySameHashIndexMap.touch();
         }
 
-        @Override
-        public K getKey() {
-            if (key == null) {
-                return null;
-            }
-            return key;
-        }
-
-        @Override
-        public V getValue() {
-            return value;
-        }
-
-        @Override
         public V setValue(final V newValue) {
             final V old = this.value;
             this.value = newValue;
@@ -96,10 +86,10 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
             if (obj == this) {
                 return true;
             }
-            if (!(obj instanceof Map.Entry)) {
+            if (!(obj instanceof LRUEntry)) {
                 return false;
             }
-            final Map.Entry<?, ?> other = (Map.Entry<?, ?>) obj;
+            final LRUEntry<?, ?> other = (LRUEntry<?, ?>) obj;
             return
                 (getKey()   == null ? other.getKey()   == null : getKey().equals(other.getKey())) &&
                 (getValue() == null ? other.getValue() == null : getValue().equals(other.getValue()));
@@ -107,42 +97,39 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
 
         @Override
         public int hashCode() {
-            return (getKey() == null ? 0 : getKey().hashCode()) ^
+            return (getKey()   == null ? 0 : getKey().hashCode()) ^
                    (getValue() == null ? 0 : getValue().hashCode());
         }
 
         @Override
         public String toString() {
-            return "" + getKey() + '=' + getValue();
+            return "{" + getKey() + '=' + getValue() + " : ["+lastTouchTimestamp+"]}";
         }
     }
 
-    private static class SameHashValueMap<K, V> extends HashMap<K, HashEntry<K, V>> {
+    private static class SameHashIndexMap<K extends Serializable, V extends Serializable> extends HashMap<K, LRUEntry<K, V>> {
         /** The hash code of the key */
-        protected int hashCode;
+        protected int index;
 
         protected long oldestTouchTimestamp;
 
-        public SameHashValueMap(int hashCode) {
+        public SameHashIndexMap(int index) {
             super();
-            this.hashCode = hashCode;
+            this.index = index;
         }
 
         @Override
-        public synchronized HashEntry<K, V> get(Object key) {
-            if (hashCode != cleanHashCode(key)) {
-                return null;
-            }
+        public synchronized LRUEntry<K, V> get(Object key) {
             return super.get(key);
         }
 
         @Override
-        public synchronized HashEntry<K, V> put(K key, HashEntry<K, V> value) {
+        public synchronized LRUEntry<K, V> put(K key, LRUEntry<K, V> value) {
             return super.put(key, value);
         }
 
         @Override
-        public synchronized HashEntry<K, V> remove(Object key) {
+        public synchronized LRUEntry<K, V> remove(Object key) {
             return super.remove(key);
         }
 
@@ -154,15 +141,15 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
         @Override
         public boolean equals(Object o) {
             if (this == o) return true;
-            if (!(o instanceof SameHashValueMap)) return false;
+            if (!(o instanceof SLRUMap.SameHashIndexMap)) return false;
             if (!super.equals(o)) return false;
-            SameHashValueMap<?, ?> that = (SameHashValueMap<?, ?>) o;
-            return hashCode == that.hashCode;
+            SameHashIndexMap<?, ?> that = (SameHashIndexMap<?, ?>) o;
+            return index == that.index;
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(super.hashCode(), hashCode);
+            return Objects.hash(super.hashCode(), index);
         }
 
         boolean oldestTouchTimestampIsDirty = true;
@@ -177,7 +164,7 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
                     oldestTouchTimestamp = super
                             .values()
                             .stream()
-                            .map(hashEntry -> hashEntry.lastTouchTimestamp)
+                            .map(lruEntry -> lruEntry.lastTouchTimestamp)
                             .min(Long::compareTo)
                             .orElse(0L);
                 }
@@ -188,19 +175,24 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
     }
 
     public SLRUMap(int newCapacity) {
-        this(newCapacity, DEFAULT_LOAD_FACTOR);
+        this(newCapacity, DEFAULT_LOAD_FACTOR, DEFAULT_FLUSH_SIZE);
+    }
+
+    public SLRUMap(int newCapacity, int minFlushSize) {
+        this(newCapacity, DEFAULT_LOAD_FACTOR, minFlushSize);
     }
 
     @SuppressWarnings("unchecked") // Because of Generic array creation
-    public SLRUMap(int newCapacity, float loadFactor) {
+    public SLRUMap(int newCapacity, float loadFactor, int minFlushSize) {
         capacity = newCapacity;
-        hashLookup = new SameHashValueMap[(int) (capacity / loadFactor)];
-        data = new HashMap<>(capacity, loadFactor);
+        hashLookup = new SameHashIndexMap[(int) (capacity / loadFactor)];
+        allEntries = new HashMap<>(capacity, loadFactor);
+        this.minFlushSize = minFlushSize;
     }
 
     @Override
     public int size() {
-        return data.size();
+        return allEntries.size();
     }
 
     public int getCapacity() {
@@ -209,96 +201,99 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
 
     @Override
     public boolean isEmpty() {
-        return data.isEmpty();
+        return allEntries.isEmpty();
     }
 
     @Override
     public synchronized boolean containsKey(Object key) {
-        return data.containsKey(key);
+        return allEntries.containsKey(key);
     }
 
     @Override
     public synchronized boolean containsValue(Object value) {
-        return data.containsValue(value);
+        return allEntries.containsValue(value);
     }
 
-    private HashEntry<K, V> findHashEntry(Object key) {
-        int index = hashIndex(key);
-        SameHashValueMap<K, V> sameHashValueMap = hashLookup[index];
-        if (sameHashValueMap != null) {
+    private LRUEntry<K, V> findHashEntry(Object key) {
+        SameHashIndexMap<K, V> sameHashIndexMap = hashLookup[hashIndex(key)];
+        if (sameHashIndexMap != null) {
             // This one IS synchronized
-            return sameHashValueMap.get(key);
+            return sameHashIndexMap.get(key);
         }
         return null;
     }
 
     @Override
     public V get(Object key) {
-        HashEntry<K, V> hashEntry = findHashEntry(key);
-        if (hashEntry == null) {
+        LRUEntry<K, V> lruEntry = findHashEntry(key);
+        if (lruEntry == null) {
             return null;
         }
-        hashEntry.touch();
-        return hashEntry.getValue();
+        lruEntry.touch();
+        return lruEntry.getValue();
     }
 
     @Override
     public synchronized V put(K key, V value) {
         int index = hashIndex(key);
-        SameHashValueMap<K, V> sameHashValueMap = hashLookup[index];
+        SameHashIndexMap<K, V> sameHashIndexMap = hashLookup[index];
 
-        if (sameHashValueMap == null) {
+        if (sameHashIndexMap == null) {
             // New entry with a previously unused hash value.
-            sameHashValueMap = new SameHashValueMap<>(key.hashCode());
-            HashEntry<K, V> hashEntry = new HashEntry<>(sameHashValueMap, key, value);
-//            sameHashValueMap.put(key, hashEntry);
-            data.put(key, hashEntry);
-            hashLookup[index] = sameHashValueMap;
-            flushLRU();
+            sameHashIndexMap = new SameHashIndexMap<>(index);
+            LRUEntry<K, V> lruEntry = new LRUEntry<>(sameHashIndexMap, key, value);
+            allEntries.put(key, lruEntry);
+            hashLookup[index] = sameHashIndexMap;
+            startFlushLRU();
             return null;
         }
 
         // So we have existing entry/ies for this hashValue.
-        HashEntry<K, V> hashEntry = sameHashValueMap.get(key);
-        if (hashEntry == null) {
+        LRUEntry<K, V> lruEntry = sameHashIndexMap.get(key);
+        if (lruEntry == null) {
             // We do not have this specific key yet
-            hashEntry = new HashEntry<>(sameHashValueMap, key, value);
+            lruEntry = new LRUEntry<>(sameHashIndexMap, key, value);
 //            sameHashValueMap.put(key, hashEntry);
-            data.put(key, hashEntry);
-            flushLRU();
+            allEntries.put(key, lruEntry);
+            startFlushLRU();
             return null;
         }
 
         // We already have this key, so we only need to replace the value.
-        V oldValue = hashEntry.getValue();
-        hashEntry.setValue(value);
-        return oldValue;
+        return lruEntry.setValue(value);
     }
 
     @Override
     public synchronized V remove(Object key) {
         int index = hashIndex(key);
-        Map<K, HashEntry<K, V>> sameHashValueMap = hashLookup[index];
+        Map<K, LRUEntry<K, V>> sameHashValueMap = hashLookup[index];
 
         if (sameHashValueMap == null) {
             return null;
         }
 
-        HashEntry<K, V> hashEntry = sameHashValueMap.get(key);
+        LRUEntry<K, V> lruEntry = sameHashValueMap.get(key);
 
-        if (hashEntry == null) {
+        if (lruEntry == null) {
             // It does not exist in the map
             return null;
         }
 
         // Found it.
         sameHashValueMap.remove(key);
-        data.remove(key);
+        allEntries.remove(key);
         if (sameHashValueMap.isEmpty()) {
             hashLookup[index] = null;
         }
-        return hashEntry.getValue();
+        return lruEntry.getValue();
     }
+
+    public int startFlushLRU() {
+        return flushLRU();
+    }
+
+    public static final int DEFAULT_FLUSH_SIZE = 100;
+    int minFlushSize;
 
     /**
      * Make sure the LRU follows the configured maximum number of entries.
@@ -306,42 +301,35 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
      */
     public int flushLRU() {
         int removed = 0;
-        while (size() > capacity) {
-            SameHashValueMap<K, V> oldestSameHashValueMap = null;
-            for (SameHashValueMap<K, V> sameHashValueMap : hashLookup) {
-                if (sameHashValueMap == null) {
-                    continue;
-                }
-                if (oldestSameHashValueMap == null) {
-                    oldestSameHashValueMap = sameHashValueMap;
-                    oldestSameHashValueMap.getOldestTouchTimestamp(); // Make sure this one is up-to-date.
-                }
-                if (oldestSameHashValueMap.oldestTouchTimestamp > sameHashValueMap.getOldestTouchTimestamp()) {
-                    oldestSameHashValueMap = sameHashValueMap;
-                }
-            }
+        while (size() > capacity + minFlushSize) {
+            synchronized (this) {
+                PriorityQueue<LRUEntry<K, V>> toRemove = new PriorityQueue<>(Comparator.comparingLong(o -> - o.lastTouchTimestamp));
+                int entriesToRemove = size() - capacity;
 
-            if (oldestSameHashValueMap != null) {
-                long oldestTouchTimestamp = oldestSameHashValueMap.getOldestTouchTimestamp();
-                List<HashEntry<K,V>> remove =
-                        oldestSameHashValueMap
-                        .values().stream()
-                        .filter(hv -> hv.lastTouchTimestamp == oldestTouchTimestamp)
-                        .collect(Collectors.toList());
-
-                synchronized (this) {
-                    for (HashEntry<K, V> removeEntry : remove) {
-                        oldestSameHashValueMap.remove(removeEntry.key);
-                        data.remove(removeEntry.key);
+                for (LRUEntry<K, V> lruEntry : allEntries.values()) {
+                    toRemove.add(lruEntry);
+                    if (toRemove.size() > entriesToRemove) {
+                        toRemove.remove();
                     }
-                    if (oldestSameHashValueMap.isEmpty()) {
-                        hashLookup[hashIndex(oldestSameHashValueMap.hashCode)] = null;
-                    } else {
-                        oldestSameHashValueMap.touch();
+                }
+//                TreeSet<LRUEntry<K, V>> toRemove = new TreeSet<>(Comparator.comparingLong(o -> o.lastTouchTimestamp));
+
+//                toRemove.addAll(allEntries.values());
+                for (LRUEntry<K, V> entry : toRemove) {
+                    K key = entry.getKey();
+                    SameHashIndexMap<K, V> sameHashIndexMap = entry.getMySameHashIndexMap();
+                    sameHashIndexMap.remove(key);
+                    allEntries.remove(key);
+                    if (sameHashIndexMap.isEmpty()) {
+                        hashLookup[sameHashIndexMap.index] = null;
+                    }
+
+                    removed++;
+                    if (--entriesToRemove == 0) {
+                        break;
                     }
                 }
             }
-            removed++;
         }
         return removed;
     }
@@ -354,23 +342,67 @@ public class SLRUMap<K, V> implements Map<K, V>, Serializable {
     @Override
     public synchronized void clear() {
         // Wipe the map
-        data.clear();
+        allEntries.clear();
         // Full wipe of the array.
         Arrays.fill(hashLookup, null);
     }
 
+    /**
+     * Don't use this. Much too slow.
+     */
     @Override
-    public Set<K> keySet() {
-        throw new UnsupportedOperationException();
+    public synchronized Set<K> keySet() {
+        return allEntries.keySet();
+    }
+
+    /**
+     * Don't use this. Much too slow.
+     */
+    @Override
+    public synchronized Collection<V> values() {
+        return allEntries.values().stream().map(LRUEntry::getValue).collect(Collectors.toList());
+    }
+
+    @AllArgsConstructor
+    private static final class TmpEntry<K, V> implements Entry<K,V> {
+        @Getter private K key;
+        @Getter private V value;
+        @Getter private long timestamp;
+
+        @Override
+        public V setValue(V value) {
+            throw new UnsupportedOperationException("Read only instance");
+        }
+
+        @Override
+        public String toString() {
+            return "\nTmpEntry{" +
+                "key=" + key +
+                ", value=" + value +
+                ", timestamp=" + timestamp +
+                '}';
+        }
+    }
+
+    /**
+     * Don't use this. Much too slow.
+     */
+    @Override
+    public synchronized Set<Entry<K, V>> entrySet() {
+        return allEntries
+            .entrySet()
+            .stream()
+            .map(e -> new TmpEntry<>(e.getKey(), e.getValue().getValue(), e.getValue().lastTouchTimestamp))
+            .collect(Collectors.toSet());
     }
 
     @Override
-    public Collection<V> values() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Set<Entry<K, V>> entrySet() {
-        throw new UnsupportedOperationException();
+    public synchronized String toString() {
+        return "SLRUMap{" +
+            "capacity=" + capacity +
+            ", hashLookup=" + Arrays.toString(hashLookup) +
+            ", allEntries=" + allEntries +
+            ", minFlushSize=" + minFlushSize +
+            '}';
     }
 }

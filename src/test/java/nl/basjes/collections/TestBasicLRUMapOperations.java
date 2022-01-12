@@ -34,10 +34,9 @@ class TestBasicLRUMapOperations {
 
     public static Iterable<TestParameter> maps() {
         return List.of(
-//            new HashMap<>(100),
-                new TestParameter("Sync(LRUMap)",   Collections.synchronizedMap(new LRUMap<>(CAPACITY))),
-                new TestParameter("LRUMap",         new LRUMap<>(CAPACITY)),
-                new TestParameter("SLRUCache",      new SLRUMap<>(CAPACITY))
+            new TestParameter("Sync(LRUMap)",   Collections.synchronizedMap(new LRUMap<>(CAPACITY))),
+            new TestParameter("LRUMap",         new LRUMap<>(CAPACITY)),
+            new TestParameter("SLRUCache",      new SLRUMap<>(CAPACITY, 0))
         );
     }
 

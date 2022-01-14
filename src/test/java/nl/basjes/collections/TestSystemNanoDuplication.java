@@ -27,9 +27,9 @@ class TestSystemNanoDuplication {
         }
 
         long count = timesList.stream().distinct().count();
-        LOG.info("System.nano() uniques: {}/{}", count, expectedUniques);
+        LOG.info("System.nanoTime() uniques: {}/{}", count, expectedUniques);
         long previous = 0;
-        for (int i = 10; i < 20; i++) {
+        for (int i = 1; i <= 30; i++) { // Skip the first on (index 0)
             if (previous != 0) {
                 LOG.info("Timestamp: {} --> Δ {}ns", times[i], times[i] - previous);
             }
@@ -38,7 +38,11 @@ class TestSystemNanoDuplication {
 
         // https://stackoverflow.com/questions/11452597/precision-vs-accuracy-of-system-nanotime
         // I expect this to pass/fail depending on the underlying operating system.
-        assertEquals(expectedUniques, count);
+        // This fails on Github Actions:
+        // Error:    TestSystemNanoDuplication.testSystemNano:41 expected: <1000000> but was: <312784>
+        if (expectedUniques != count) {
+            LOG.fatal("Your system will see a less accurate LRU ordering because of the way System.nanoTime() works!!");
+        }
     }
 
 }

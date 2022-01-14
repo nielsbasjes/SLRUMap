@@ -90,7 +90,7 @@ This dependency:
 
 and in your code:
 
-    Map<Foo, Bar> cache = new new SLRUMap<>(10000);
+    Map<Foo, Bar> cache = new SLRUMap<>(10000);
 
 Also: I recommend staying below 100000 in cache size.
 

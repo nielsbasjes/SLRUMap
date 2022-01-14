@@ -64,3 +64,35 @@ This SLRUmap as benchmarked on my i7 based laptop:
 
 # Usecase
 If you have a highly concurrent need for an LRU cache (where the 'sort of' LRU is fine) where you have a very high hit ratio. Like I have with [Yauaa](https://yauaa.basjes.nl).
+
+# Can I try?
+Sure, but do be aware that this is highly experimental software!
+
+This repo:
+
+    <repositories>
+      <repository>
+        <id>sonatype-oss-snapshots</id>
+        <name>Sonatype OSS Snapshots</name>
+        <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+        <releases><enabled>false</enabled></releases>
+        <snapshots><enabled>true</enabled></snapshots>
+      </repository>
+    </repositories>
+
+This dependency:
+
+    <dependency>
+        <groupId>nl.basjes.collections</groupId>
+        <artifactId>slru-map</artifactId>
+        <version>0.1-SNAPSHOT</version>
+    </dependency>
+
+and in your code:
+
+    Map<Foo, Bar> cache = new new SLRUMap<>(10000);
+
+Also: I recommend staying below 100000 in cache size.
+
+And please let me know where it breaks and where it works.
+

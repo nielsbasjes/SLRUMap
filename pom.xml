@@ -24,7 +24,7 @@
 
     <git-commit-id-maven-plugin.version>5.0.0</git-commit-id-maven-plugin.version>
 
-    <maven-deploy-plugin.version>3.0.0-M2</maven-deploy-plugin.version>
+    <maven-deploy-plugin.version>3.0.0</maven-deploy-plugin.version>
     <maven-gpg-plugin.version>3.0.1</maven-gpg-plugin.version>
     <maven-javadoc-plugin.version>3.4.0</maven-javadoc-plugin.version>
     <maven-source-plugin.version>3.2.1</maven-source-plugin.version>
